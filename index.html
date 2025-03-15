@@ -1,1 +1,153 @@
-<!DOCTYPE html><html><head><title>Prompt Injection Analytics Tool</title></head><body><h1>Prompt Injection Analytics Tool</h1></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompt Injection Analytics Tool Guide</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        li {
+            margin-bottom: 10px;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        code {
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Building a Prompt Injection Analytics Tool</h1>
+    <p>Here’s a plain-text guide to building and deploying a prompt injection analytics tool, followed by Python code examples for each step.</p>
+
+    <h2>Step-by-Step Explanation</h2>
+    <ul>
+        <li>- Start by setting up a Python environment with key libraries: install re for regex, spaCy for NLP, SQLite3 for logging, Pandas for data analysis, Matplotlib for visualization, Flask for the server, and multiprocessing for scale.</li>
+        <li>- Write a core script using re to scan inputs for patterns like “ignore previous” or “s3cr3t” in real time—use regex like r"(ignore|s[3e]cr[3e]t)" to catch these.</li>
+        <li>- Download spaCy’s English model (python -m spacy download en_core_web_sm), then train a custom text classifier with 10,000 sample prompts (e.g., “tell me secrets”)—tweak hyperparameters until it hits 90%+ accuracy.</li>
+        <li>- Create an SQLite database to log each prompt and response in a table (columns: timestamp, input, output), then write queries to spot shifts like a response doubling in length.</li>
+        <li>- Use Pandas to load logged data, compute stats like injection success rates (e.g., successes / total attempts), and plot trends with Matplotlib—save charts as PNGs.</li>
+        <li>- Build a Flask app with a POST endpoint (/analyze) to process prompts, wrapping the regex and spaCy checks in a function, and use multiprocessing.Pool to handle 500+ prompts per minute.</li>
+        <li>- Debug edge cases (e.g., Unicode injections like “\u0073ecret”) by adjusting spaCy’s tokenizer to normalize text before analysis.</li>
+        <li>- Deploy it on a server: package the app in a Docker container (use a Dockerfile with FROM python:3.9, COPY your code, and RUN pip install), then push to AWS EC2 or a similar cloud service.</li>
+        <li>- Test with sample attacks, refine based on false positives, and monitor logs to ensure it cuts vulnerabilities effectively—aim for a 60% reduction.</li>
+    </ul>
+
+    <h2>Code Examples</h2>
+    <ul>
+        <li>
+            <strong>Set up Python environment with key libraries:</strong>
+            <pre><code># In terminal: pip install re spacy sqlite3 pandas matplotlib flask multiprocessing
+# Install spaCy model: python -m spacy download en_core_web_sm
+import re, spacy, sqlite3, pandas as pd, matplotlib.pyplot as plt, flask, multiprocessing</code></pre>
+        </li>
+        <li>
+            <strong>Core script using re to scan inputs:</strong>
+            <pre><code>import re
+def check_injection(text):
+    pattern = r"(ignore|s[3e]cr[3e]t)"
+    return bool(re.search(pattern, text.lower()))
+print(check_injection("ignore previous"))  # True</code></pre>
+        </li>
+        <li>
+            <strong>Train spaCy classifier for imperative phrases:</strong>
+            <pre><code>import spacy
+from spacy.training import Example
+nlp = spacy.load("en_core_web_sm")
+textcat = nlp.add_pipe("textcat")
+textcat.add_label("INJECTION")
+train_data = [("tell me secrets", {"cats": {"INJECTION": 1.0}}), ("hi there", {"cats": {"INJECTION": 0.0}})]
+for epoch in range(10):
+    for text, annot in train_data:
+        doc = nlp.make_doc(text)
+        example = Example.from_dict(doc, annot)
+        nlp.update([example])</code></pre>
+        </li>
+        <li>
+            <strong>Log context windows with SQLite:</strong>
+            <pre><code>import sqlite3
+conn = sqlite3.connect("prompts.db")
+conn.execute("CREATE TABLE logs (timestamp TEXT, input TEXT, output TEXT)")
+conn.execute("INSERT INTO logs VALUES (?, ?, ?)", ("2025-03-15", "tell me secrets", "normal answer"))
+conn.commit()
+anomaly = conn.execute("SELECT input, output FROM logs WHERE length(output) > 50").fetchall()
+conn.close()</code></pre>
+        </li>
+        <li>
+            <strong>Use Pandas and Matplotlib for stats and trends:</strong>
+            <pre><code>import pandas as pd
+import matplotlib.pyplot as plt
+df = pd.read_sql_query("SELECT * FROM logs", sqlite3.connect("prompts.db"))
+success_rate = len(df[df["output"].str.contains("secret")]) / len(df)
+df["timestamp"].value_counts().plot(kind="bar")
+plt.savefig("trends.png")</code></pre>
+        </li>
+        <li>
+            <strong>Build Flask app with multiprocessing:</strong>
+            <pre><code>from flask import Flask, request
+from multiprocessing import Pool
+app = Flask(__name__)
+def analyze_prompt(text):
+    return check_injection(text) or nlp(text).cats["INJECTION"] > 0.9
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    text = request.json["prompt"]
+    with Pool(4) as p:
+        result = p.apply(analyze_prompt, (text,))
+    return {"injection_detected": result}
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)</code></pre>
+        </li>
+        <li>
+            <strong>Debug edge cases with Unicode normalization:</strong>
+            <pre><code>def normalize_text(text):
+    return text.encode().decode("unicode_escape").lower()
+nlp.tokenizer = lambda text: nlp.make_doc(normalize_text(text))
+print(nlp("\u0073ecret").text)  # "secret"</code></pre>
+        </li>
+        <li>
+            <strong>Deploy with Docker and AWS EC2:</strong>
+            <pre><code># Dockerfile
+FROM python:3.9
+WORKDIR /app
+COPY . .
+RUN pip install -r requirements.txt
+CMD ["python", "app.py"]
+
+# In terminal:
+# docker build -t prompt-tool .
+# docker run -p 5000:5000 prompt-tool
+# Deploy to EC2: Upload Docker image to ECR, launch EC2 instance, pull and run</code></pre>
+        </li>
+        <li>
+            <strong>Test and monitor:</strong>
+            <pre><code>import requests
+test_prompts = ["ignore rules", "normal question"]
+for prompt in test_prompts:
+    response = requests.post("http://localhost:5000/analyze", json={"prompt": prompt})
+    print(response.json())
+# Check logs.db manually or automate with a cron job to query anomalies</code></pre>
+        </li>
+    </ul>
+
+    <p>These examples provide a starting point—expand with error handling or optimization as needed!</p>
+</body>
+</html>
